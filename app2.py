@@ -44,7 +44,7 @@ try:
     df_raw = load_data()
     cols = df_raw.columns.tolist()
 
-    # Mapeamento de Colunas (Índices baseados na sua estrutura)
+    # Mapeamento de Colunas
     col_data = cols[2]        # C
     col_cliente = cols[4]     # E
     col_digitador = cols[15]  # P
@@ -70,11 +70,11 @@ try:
     data_min, data_max = df_raw[col_data].min().date(), df_raw[col_data].max().date()
     periodo = st.sidebar.date_input("Período:", value=(data_min, data_max))
 
-    # --- PROCESSAMENTO DE DADOS ---
+    # --- PROCESSAMENTO ---
     df_periodo = df_raw[(df_raw[col_data].dt.date >= periodo[0]) & (df_raw[col_data].dt.date <= periodo[1])]
     df_sel = df_periodo[df_periodo[col_digitador] == selecionado]
     
-    # Identificar Benchmarks (Top 1 e Ativos)
+    # Benchmarking
     ranking_vol = df_periodo[df_periodo[col_proposta].str.upper() == 'DISBURSED'].groupby(col_digitador)[col_ticket].sum().sort_values(ascending=False)
     top_nome = ranking_vol.index[0] if not ranking_vol.empty else "N/A"
     df_top1 = df_periodo[df_periodo[col_digitador] == top_nome]
@@ -94,86 +94,76 @@ try:
     data_total = get_dfs_status(df_periodo)
     data_top = get_dfs_status(df_top1)
 
-    # --- 1. KPI FINANCEIRO (BENCHMARKING) ---
+    # --- INTERFACE ---
     st.title(f"Performance Individual: {selecionado}")
-    st.subheader("💰 Volume Pago (R$)")
     
+    # 1. KPIs FINANCEIROS
     f1, f2, f3 = st.columns(3)
     vol_sel = data_sel["Pagos"][col_ticket].sum()
     vol_med = data_total["Pagos"][col_ticket].sum() / qtd_ativos if qtd_ativos > 0 else 0
     vol_top = data_top["Pagos"][col_ticket].sum()
 
-    f1.metric("Meu Volume", formata_reais(vol_sel))
+    f1.metric("Meu Volume Pago", formata_reais(vol_sel))
     f2.metric("Média Equipe", formata_reais(vol_med), delta=formata_reais(vol_sel - vol_med))
-    f3.metric(f"Top 1 ({top_nome})", formata_reais(vol_top), delta=formata_reais(vol_sel - vol_top), delta_color="normal")
+    f3.metric(f"Líder ({top_nome})", formata_reais(vol_top), delta=formata_reais(vol_sel - vol_top), delta_color="normal")
 
-    # --- 2. FUNIL QUANTITATIVO COM DRILL DOWN ---
+    # 2. FUNIL COM DRILL DOWN
     st.divider()
-    st.subheader("📊 Funil de Propostas (Qtd) & Drill Down")
-    
     tab1, tab2, tab3, tab4 = st.tabs(["📋 Simuladas", "✅ Aprovadas", "💸 Pagos", "🚫 Reprovadas"])
 
     with tab1:
         st.markdown('<div class="funnel-header">DETALHE: SIMULADAS</div>', unsafe_allow_html=True)
-        q1, q2, q3 = st.columns(3)
-        q1.metric("Individual", f"{len(data_sel['Simuladas'])} un")
-        q2.metric("Média Equipe", f"{len(data_total['Simuladas'])/qtd_ativos:.1f} un")
-        q3.metric("Líder", f"{len(data_top['Simuladas'])} un")
         st.dataframe(data_sel["Simuladas"][[col_data, col_cliente, col_analise, col_proposta, col_ticket]], use_container_width=True)
-
     with tab2:
         st.markdown('<div class="funnel-header">DETALHE: APROVADAS</div>', unsafe_allow_html=True)
-        q4, q5, q6 = st.columns(3)
-        q4.metric("Individual", f"{len(data_sel['Aprovadas'])} un")
-        q5.metric("Média Equipe", f"{len(data_total['Aprovadas'])/qtd_ativos:.1f} un")
-        q6.metric("Líder", f"{len(data_top['Aprovadas'])} un")
         st.dataframe(data_sel["Aprovadas"][[col_data, col_cliente, col_ticket]], use_container_width=True)
-
     with tab3:
         st.markdown('<div class="funnel-header">DETALHE: PAGOS</div>', unsafe_allow_html=True)
-        q7, q8, q9 = st.columns(3)
-        q7.metric("Individual", f"{len(data_sel['Pagos'])} un")
-        q8.metric("Média Equipe", f"{len(data_total['Pagos'])/qtd_ativos:.1f} un")
-        q9.metric("Líder", f"{len(data_top['Pagos'])} un")
         st.dataframe(data_sel["Pagos"][[col_data, col_cliente, col_ticket]], use_container_width=True)
-
     with tab4:
-        st.markdown('<div class="funnel-header">ANÁLISE DE PERDAS (REPROVADAS)</div>', unsafe_allow_html=True)
-        if not data_sel["Reprovadas"].empty:
-            st.dataframe(data_sel["Reprovadas"][[col_cliente, col_motivo]], use_container_width=True)
-        else:
-            st.success("Nenhuma reprovação no período.")
+        st.markdown('<div class="funnel-header">ANÁLISE DE REPROVAÇÕES</div>', unsafe_allow_html=True)
+        st.dataframe(data_sel["Reprovadas"][[col_cliente, col_motivo]], use_container_width=True)
 
-    # --- 3. TOPA+ OPORTUNIDADES (POTENCIAL) ---
+    # --- 3. TOPA+ OPORTUNIDADES (SOMENTE DISBURSED) ---
     st.divider()
-    st.subheader("🚀 Topa+ Oportunidades - Potencial de Negócios")
+    st.subheader("🚀 Topa+ Oportunidades (Base: Empresas Pagas)")
     
-    # Agrupamento por CNPJ para análise de potencial
-    df_op = data_sel["Simuladas"].groupby(col_cnpj).agg({
-        col_nome_empresa: 'first',
-        col_func: 'max',
-        col_ticket: 'sum' # O que já foi vendido
-    }).reset_index()
+    # Lógica: Filtrar apenas registros onde o status da proposta é DISBURSED
+    df_pagos_op = df_sel[df_sel[col_proposta].str.upper().str.strip() == 'DISBURSED']
     
-    # Filtrar apenas quem pagou na realidade do digitador para pegar o ticket médio dele
-    tkt_medio = data_sel["Pagos"][col_ticket].mean() if not data_sel["Pagos"].empty else 0
-    
-    df_op.columns = ['CNPJ', 'Empresa', 'Funcionários', 'Volume Realizado']
-    df_op['Potencial Total'] = df_op['Funcionários'] * tkt_medio
-    df_op['Gap (Oportunidade)'] = df_op['Potencial Total'] - df_op['Volume Realizado']
+    if not df_pagos_op.empty:
+        # Agrupar por CNPJ apenas as empresas que já tiveram pagamentos
+        df_op = df_pagos_op.groupby(col_cnpj).agg({
+            col_nome_empresa: 'first',
+            col_func: 'max',
+            col_ticket: ['count', 'sum']
+        }).reset_index()
+        
+        df_op.columns = ['CNPJ', 'Empresa', 'Colaboradores', 'Qtd Efetivada', 'Volume Realizado']
+        
+        # Ticket Médio do Digitador (usando todos os seus pagamentos do período)
+        tkt_medio = data_sel["Pagos"][col_ticket].mean()
+        
+        # Cálculo de Potencial
+        df_op['Potencial Total'] = df_op['Colaboradores'] * tkt_medio
+        df_op['Gap (R$)'] = df_op['Potencial Total'] - df_op['Volume Realizado']
+        df_op['Penetração'] = (df_op['Qtd Efetivada'] / df_op['Colaboradores'] * 100).fillna(0)
 
-    o1, o2, o3 = st.columns(3)
-    o1.metric("Empresas em Carteira", f"{len(df_op)} un")
-    o2.metric("Potencial em Carteira", formata_reais(df_op['Potencial Total'].sum()))
-    o3.metric("Ticket Médio Ref.", formata_reais(tkt_medio))
+        o1, o2, o3 = st.columns(3)
+        o1.metric("Empresas com Pagos", f"{len(df_op)} un")
+        o2.metric("Potencial Restante", formata_reais(df_op['Gap (R$)'].sum()))
+        o3.metric("Ticket Médio Ref.", formata_reais(tkt_medio))
 
-    # Tabela Drill Down Oportunidades
-    df_op_disp = df_op.copy()
-    for c in ['Volume Realizado', 'Potencial Total', 'Gap (Oportunidade)']:
-        df_op_disp[c] = df_op_disp[c].apply(formata_reais)
-    
-    st.markdown("**Onde está o dinheiro (por Empresa):**")
-    st.dataframe(df_op_disp.sort_values('Funcionários', ascending=False), use_container_width=True, hide_index=True)
+        # Tabela Drill Down Formatada
+        df_op_disp = df_op.copy()
+        for c in ['Volume Realizado', 'Potencial Total', 'Gap (R$)']:
+            df_op_disp[c] = df_op_disp[c].apply(formata_reais)
+        df_op_disp['Penetração'] = df_op_disp['Penetração'].apply(lambda x: f"{x:.1f}%")
+        
+        st.markdown("**Análise de Carteira Ativa:**")
+        st.dataframe(df_op_disp.sort_values('Gap (R$)', ascending=False), use_container_width=True, hide_index=True)
+    else:
+        st.warning("Este digitador ainda não possui propostas com status 'Disbursed' no período selecionado.")
 
 except Exception as e:
-    st.error(f"Erro ao carregar o Dashboard: {e}")
+    st.error(f"Erro ao processar o Dashboard: {e}")
