@@ -148,30 +148,7 @@ try:
         q7.metric("Conversão Final", f"{(len(dfs['Pagos'])/len(dfs['Simuladas'])*100 if len(dfs['Simuladas'])>0 else 0):.2f}%")
         q8.metric("Aproveitamento", f"{(len(dfs['Aprovadas'])/len(dfs['Passíveis'])*100 if len(dfs['Passíveis'])>0 else 0):.1f}%")
 
-    # 3. HIERARQUIA
-    with st.expander("👥 KPI's - Performance da Hierarquia", expanded=True):
-        h1, h2, h3, h4 = st.columns(4)
-        df_pagos = dfs["Pagos"]
-        qtd_ativos_pagos = df_pagos[col_digitadores].nunique() if not df_pagos.empty else 0
-        h1.metric("Digitadores Ativos (Pagos)", qtd_ativos_pagos)
-        total_pago_hierarquia = df_pagos[col_ticket].sum()
-        media_pago = (total_pago_hierarquia / qtd_ativos_pagos) if qtd_ativos_pagos > 0 else 0
-        h2.metric("Média R$ / Digitador", formata_reais(media_pago))
-        media_qtd = (len(df_pagos) / qtd_ativos_pagos) if qtd_ativos_pagos > 0 else 0
-        h3.metric("Média Contratos / Digitador", f"{media_qtd:.1f}")
-        ticket_medio_pagos = df_pagos[col_ticket].mean() if len(df_pagos) > 0 else 0
-        h4.metric("Ticket Médio (Pagos)", formata_reais(ticket_medio_pagos))
-
-        st.markdown("---")
-        st.subheader("🏆 Top 10 Digitadores - Performance (Pagos)")
-        if not df_pagos.empty:
-            top_10 = df_pagos.groupby(col_digitadores)[col_ticket].sum().sort_values(ascending=False).head(10).reset_index()
-            fig_top = go.Figure(go.Bar(
-                x=top_10[col_ticket], y=top_10[col_digitadores], orientation='h',
-                marker_color='#00CCCC', text=top_10[col_ticket].apply(formata_reais), textposition='auto'
-            ))
-            fig_top.update_layout(yaxis={'categoryorder':'total ascending'}, height=500)
-            st.plotly_chart(fig_top, use_container_width=True)
+   True)
 
 
 
