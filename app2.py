@@ -1,138 +1,146 @@
 
+
 import streamlit as st
 import pandas as pd
-import os
 import plotly.graph_objects as go
+import os
 
-st.set_page_config(page_title="Dashboard Topa+", layout="wide")
+st.set_page_config(page_title="Performance Individual | Topa+", layout="wide")
 
-# --- ESTILIZAÇÃO TURQUESA ---
+# --- ESTILIZAÇÃO (TURQUESA) ---
 st.markdown("""
     <style>
     .stApp { background-color: #f8f9fa; }
     [data-testid="stSidebar"] { background-color: #99FFFF !important; }
-    [data-testid="stSidebar"] .stMarkdown p, 
-    [data-testid="stSidebar"] label,
-    [data-testid="stSidebar"] .stHeader {
-        color: #004D40 !important;
-        font-weight: 700 !important;
-    }
     div[data-testid="stMetric"] {
         background-color: #ffffff !important;
-        padding: 20px !important;
-        border-radius: 15px !important;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.08) !important;
-        border: 1px solid #eef2f7 !important;
-        transition: transform 0.3s ease;
+        border-left: 5px solid #00CCCC !important;
+        border-radius: 10px !important;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05) !important;
     }
-    div[data-testid="stMetric"]:hover { transform: translateY(-5px); }
-    h1 { font-weight: 800 !important; letter-spacing: -1px; }
+    .highlight { color: #008080; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- CONEXÃO GOOGLE SHEETS ---
+# --- CARREGAMENTO ---
 sheet_id = "1_p5-a842gjyMoif57NdJLrUfccNkVptkNiuSPtTe5Pw"
 url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=Dados2"
 
 @st.cache_data(ttl=600)
 def load_data():
-    return pd.read_csv(url, dtype=str)
+    df = pd.read_csv(url, dtype=str)
+    df.columns = df.columns.str.strip()
+    return df
 
 try:
     df_base = load_data()
-    df_base.columns = df_base.columns.str.strip()
-    colunas_reais = df_base.columns.tolist()
-
-    # --- MAPEAMENTO ---
-    col_estado = colunas_reais[6]  # Estado (G)
-    col_data = colunas_reais[2]  # Coluna C
-    col_ticket = 'ticket' if 'ticket' in colunas_reais else colunas_reais[29] # Coluna AD
-    col_digitadores = colunas_reais[15] # Coluna P
-
-    # Mapeamento específico para as colunas de CNPJ e Ticket
-    col_ticket = 'ticket' if 'ticket' in colunas_reais else colunas_reais[29]
-    col_cnpj = 'employer_document' if 'employer_document' in colunas_reais else colunas_reais[34]
-    col_func = 'qtde_funcionarios' if 'qtde_funcionarios' in colunas_reais else colunas_reais[35]
-
+    cols = df_base.columns.tolist()
     
+    # Mapeamento
+    col_data = cols[2]
+    col_digitador = cols[15]
+    col_status_an = cols[25]
+    col_status_pr = cols[26]
+    col_motivo = cols[28]
+    col_ticket = cols[29]
 
-    # --- TRATAMENTO DE TICKET ---
-    df_base[col_ticket] = df_base[col_ticket].fillna('0').astype(str).str.strip()
-    df_base[col_ticket] = df_base[col_ticket].str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
-    df_base[col_ticket] = pd.to_numeric(df_base[col_ticket], errors='coerce').fillna(0)
-
-    # --- TRATAMENTO DE DATA (AJUSTE CRÍTICO) ---
-    # Usamos dayfirst=True para evitar que 05/01 vire 01 de Maio
+    # Tratamento
+    df_base[col_ticket] = pd.to_numeric(df_base[col_ticket].str.replace('.', '').str.replace(',', '.'), errors='coerce').fillna(0)
     df_base[col_data] = pd.to_datetime(df_base[col_data], dayfirst=True, errors='coerce')
     df_base = df_base.dropna(subset=[col_data])
 
-    # --- SIDEBAR ---
-    logo = "topa (1).png" 
-    if os.path.exists(logo):
-        st.sidebar.image(logo, use_container_width=True)
+    # --- FILTROS SIDEBAR ---
+    st.sidebar.header("Análise Individual")
     
-    st.sidebar.header("Filtros")
+    # 1. Filtro de Digitador (Obrigatório selecionar um)
+    lista_digitadores = sorted(df_base[col_digitador].dropna().unique().tolist())
+    selecionado = st.sidebar.selectbox("Escolha o Digitador para Análise:", lista_digitadores)
+    
+    # 2. Filtro de Período
     data_min, data_max = df_base[col_data].min().date(), df_base[col_data].max().date()
     periodo = st.sidebar.date_input("Período:", value=(data_min, data_max))
 
-    df_filtrado = df_base.copy()
-    if isinstance(periodo, (list, tuple)) and len(periodo) == 2:
-        # Filtro comparando apenas a data (ignora a hora da planilha)
-        df_filtrado = df_filtrado[(df_filtrado[col_data].dt.date >= periodo[0]) & (df_filtrado[col_data].dt.date <= periodo[1])]
+    # Filtragem Base
+    df_periodo = df_base[(df_base[col_data].dt.date >= periodo[0]) & (df_base[col_data].dt.date <= periodo[1])]
+    
+    # Separação de Dados
+    df_individuo = df_periodo[df_periodo[col_digitador] == selecionado]
+    # Média do grupo (excluindo o selecionado para um comparativo real, ou mantendo todos)
+    df_grupo = df_periodo 
 
-    # Filtros Hierárquicos
-    for col_ref, label in zip(['Empresa', 'Squad', 'Digitado por'], ['Master (Q)', 'Equipe (R)', 'Digitador (P)']):
-        col_real = next((c for c in colunas_reais if col_ref.upper() in str(c).upper()), None)
-        if col_real:
-            opc = ["Todos"] + sorted(df_filtrado[col_real].dropna().unique().astype(str).tolist())
-            sel = st.sidebar.selectbox(label, opc)
-            if sel != "Todos": df_filtrado = df_filtrado[df_filtrado[col_real] == sel]
+    # --- CÁLCULOS DE KPI ---
+    def get_metrics(df):
+        pagos = df[df[col_status_pr].str.upper() == 'DISBURSED']
+        aprov = df[df[col_status_an].str.upper() == 'APPROVED']
+        return {
+            "vol_pago": pagos[col_ticket].sum(),
+            "qtd_pago": len(pagos),
+            "ticket_medio": pagos[col_ticket].mean() if len(pagos) > 0 else 0,
+            "conversao": (len(pagos) / len(df) * 100) if len(df) > 0 else 0
+        }
 
-    # --- LÓGICA DE STATUS ---
-    col_analise = colunas_reais[25] # Coluna Z
-    col_proposta = colunas_reais[26] # Coluna AA
-    col_descricao_status_proposta = colunas_reais[27] # Coluna AB
-    col_motivo_da_decisao = colunas_reais[28] # Coluna AC
-         
-    status_analise_limpo = df_filtrado[col_analise].fillna('VAZIO').astype(str).str.upper().str.strip()
-    status_proposta_limpo = df_filtrado[col_proposta].fillna('VAZIO').astype(str).str.upper().str.strip()
-
-    excluir_passivos = ['NOT_ANALIZED', 'NOT_ANALYZED', 'FAILED_DATAPREV', 'VAZIO', 'NAN', 'CREATED', 'TOKEN_SENT']
-    lista_analisadas_base = ['REJECTED']
-    lista_gerados = ['CANCELLED_BY_USER', 'EXPIRED', 'CONTRACT_GENERATED', 'DISBURSED']
-
-    dfs = {
-        "Simuladas": df_filtrado,
-        "Passíveis": df_filtrado[~status_analise_limpo.isin(excluir_passivos)],
-        "Analisadas": df_filtrado[(status_analise_limpo.isin(lista_analisadas_base)) | (status_analise_limpo == 'APPROVED')],
-        "Aprovadas": df_filtrado[status_analise_limpo == 'APPROVED'],
-        "Gerados": df_filtrado[status_proposta_limpo.isin(lista_gerados)],
-        "Pagos": df_filtrado[status_proposta_limpo == 'DISBURSED'],
+    m_ind = get_metrics(df_individuo)
+    
+    # Média por digitador do grupo
+    digitadores_ativos = df_grupo[col_digitador].nunique()
+    m_grupo = {
+        "vol_pago": df_grupo[df_grupo[col_status_pr].str.upper() == 'DISBURSED'][col_ticket].sum() / digitadores_ativos,
+        "qtd_pago": len(df_grupo[df_grupo[col_status_pr].str.upper() == 'DISBURSED']) / digitadores_ativos,
+        "ticket_medio": df_grupo[df_grupo[col_status_pr].str.upper() == 'DISBURSED'][col_ticket].mean()
     }
 
-    def formata_reais(valor):
-        return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
     # --- INTERFACE ---
-    st.title("Command Center | Topa & Bull")
+    st.title(f"Performance: {selecionado}")
+    st.markdown(f"Análise de **{periodo[0].strftime('%d/%m/%Y')}** até **{periodo[1].strftime('%d/%m/%Y')}**")
+
+    # 1. KPIs COMPARATIVOS
+    st.subheader("📊 Comparativo vs Média da Equipe")
+    c1, c2, c3 = st.columns(3)
+    
+    def format_reais(v): return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    with c1:
+        delta = m_ind["vol_pago"] - m_grupo["vol_pago"]
+        st.metric("Volume Pago", format_reais(m_ind["vol_pago"]), delta=format_reais(delta))
+        st.caption(f"Média Equipe: {format_reais(m_grupo['vol_pago'])}")
+
+    with c2:
+        delta_qtd = m_ind["qtd_pago"] - m_grupo["qtd_pago"]
+        st.metric("Contratos Pagos", f"{m_ind['qtd_pago']} un", delta=f"{delta_qtd:.1f}")
+        st.caption(f"Média Equipe: {m_grupo['qtd_pago']:.1f} un")
+
+    with c3:
+        st.metric("Conversão Individual", f"{m_ind['conversao']:.2f}%")
+        st.progress(m_ind['conversao'] / 100)
+
     st.divider()
 
-    # 1. FINANCEIRO
-    with st.expander("💰 KPI's - Volume Financeiro (R$)", expanded=True):
-        f1, f2, f3, f4 = st.columns(4)
-        f1.metric("Propostas Aprovadas", formata_reais(dfs["Aprovadas"][col_ticket].sum()))
-        f2.metric("Contratos Gerados", formata_reais(dfs["Gerados"][col_ticket].sum()))
-        f3.metric("Contratos Pagos", formata_reais(dfs["Pagos"][col_ticket].sum()))
-        ticket_medio = dfs["Pagos"][col_ticket].mean() if len(dfs["Pagos"]) > 0 else 0
-        f4.metric("Ticket Médio (Pagos)", formata_reais(ticket_medio))
+    # 2. RADAR DE MOTIVOS DO DIGITADOR
+    st.subheader("🚫 Motivos de Reprovação do Digitador")
+    df_repro = df_individuo[df_individuo[col_status_an].str.upper() == 'REJECTED']
+    
+    if not df_repro.empty:
+        motivos = df_repro[col_motivo].value_counts()
+        cols_m = st.columns(len(motivos.head(4)))
+        for i, (motivo, qtd) in enumerate(motivos.head(4).items()):
+            cols_m[i].markdown(f"""
+                <div style="background:#FFF3E0; padding:10px; border-radius:10px; border-left:4px solid #FF9800">
+                    <small>{motivo[:25]}...</small>
+                    <h3>{qtd}</h3>
+                </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.success("Nenhuma reprovação para este digitador no período!")
 
-        st.markdown("---")
-        c1, c2, = st.columns(2)      
-        vol_total = dfs["Simuladas"][col_ticket].sum()
-        vol_gerados = dfs["Gerados"][col_ticket].sum()
-        vol_pagos = dfs["Pagos"][col_ticket].sum()
-        c1.metric("Conversão Simulados x Pagos", f"{(vol_pagos/vol_total*100 if vol_total > 0 else 0):.2f}%")
-        c2.metric("Conversão Contratos Gerados x Pagos", f"{(vol_pagos/vol_gerados*100 if vol_gerados > 0 else 0):.2f}%")
+    # 3. EVOLUÇÃO DIÁRIA DO DIGITADOR
+    st.subheader("📈 Evolução de Produção (R$)")
+    df_evol = df_individuo.groupby(df_individuo[col_data].dt.date)[col_ticket].sum().reset_index()
+    fig = go.Figure(go.Scatter(x=df_evol[col_data], y=df_evol[col_ticket], fill='tozeroy', line_color='#008080'))
+    fig.update_layout(height=300, margin=dict(l=0,r=0,t=0,b=0))
+    st.plotly_chart(fig, use_container_width=True)
+
+except Exception as e:
+    st.error(f"Erro ao processar análise do digitador: {e}")
 
     # 2. QUANTITATIVO
     with st.expander("📊 KPI's - Fluxo de Propostas (Qtd)", expanded=True):
@@ -148,7 +156,30 @@ try:
         q7.metric("Conversão Final", f"{(len(dfs['Pagos'])/len(dfs['Simuladas'])*100 if len(dfs['Simuladas'])>0 else 0):.2f}%")
         q8.metric("Aproveitamento", f"{(len(dfs['Aprovadas'])/len(dfs['Passíveis'])*100 if len(dfs['Passíveis'])>0 else 0):.1f}%")
 
-   True)
+    # 3. HIERARQUIA
+    with st.expander("👥 KPI's - Performance da Hierarquia", expanded=True):
+        h1, h2, h3, h4 = st.columns(4)
+        df_pagos = dfs["Pagos"]
+        qtd_ativos_pagos = df_pagos[col_digitadores].nunique() if not df_pagos.empty else 0
+        h1.metric("Digitadores Ativos (Pagos)", qtd_ativos_pagos)
+        total_pago_hierarquia = df_pagos[col_ticket].sum()
+        media_pago = (total_pago_hierarquia / qtd_ativos_pagos) if qtd_ativos_pagos > 0 else 0
+        h2.metric("Média R$ / Digitador", formata_reais(media_pago))
+        media_qtd = (len(df_pagos) / qtd_ativos_pagos) if qtd_ativos_pagos > 0 else 0
+        h3.metric("Média Contratos / Digitador", f"{media_qtd:.1f}")
+        ticket_medio_pagos = df_pagos[col_ticket].mean() if len(df_pagos) > 0 else 0
+        h4.metric("Ticket Médio (Pagos)", formata_reais(ticket_medio_pagos))
+
+        st.markdown("---")
+        st.subheader("🏆 Top 10 Digitadores - Performance (Pagos)")
+        if not df_pagos.empty:
+            top_10 = df_pagos.groupby(col_digitadores)[col_ticket].sum().sort_values(ascending=False).head(10).reset_index()
+            fig_top = go.Figure(go.Bar(
+                x=top_10[col_ticket], y=top_10[col_digitadores], orientation='h',
+                marker_color='#00CCCC', text=top_10[col_ticket].apply(formata_reais), textposition='auto'
+            ))
+            fig_top.update_layout(yaxis={'categoryorder':'total ascending'}, height=500)
+            st.plotly_chart(fig_top, use_container_width=True)
 
 
 
@@ -230,3 +261,4 @@ try:
 
 except Exception as e:
     st.error(f"Erro: {e}")
+    
