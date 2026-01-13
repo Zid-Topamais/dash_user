@@ -28,145 +28,122 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- CONEXÃO E CARREGAMENTO ---
-sheet_id = "1_p5-a842gjyMoif57NdJLrUfccNkVptkVptkNiuSPtTe5Pw"
+# Verifique se este ID está correto na sua barra de endereços do navegador
+sheet_id = "1_p5-a842gjyMoif57NdJLrUfccNkVptkNiuSPtTe5Pw"
+# Verifique se a aba se chama exatamente "Dados2"
 url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=Dados2"
 
 @st.cache_data(ttl=600)
-def load_data():
-    df = pd.read_csv(url, dtype=str)
-    df.columns = df.columns.str.strip()
-    return df
+def load_data(url_link):
+    try:
+        df = pd.read_csv(url_link, dtype=str)
+        df.columns = df.columns.str.strip()
+        return df
+    except Exception as e:
+        st.error(f"Erro ao acessar a planilha: {e}")
+        st.info("Verifique se a planilha está 'Publicada na Web' como CSV e se o nome da aba é 'Dados2'.")
+        return None
 
 def formata_reais(v):
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-try:
-    df_raw = load_data()
-    cols = df_raw.columns.tolist()
+df_raw = load_data(url)
 
-    # --- MAPEAMENTO DE COLUNAS ---
-    col_data_criacao = cols[2]     # Coluna C (Data de Criação)
-    col_data_pagamento = cols[23]  # Coluna X (Data de Pagamento)
-    col_cliente = cols[4]          # Coluna E
-    col_digitador = cols[15]       # Coluna P
-    col_analise = cols[25]         # Coluna Z
-    col_proposta = cols[26]        # Coluna AA
-    col_motivo = cols[28]          # Coluna AC
-    col_ticket = cols[29]          # Coluna AD
-    col_nome_empresa = cols[33]    # Coluna AH
-    col_cnpj = cols[34]            # Coluna AI
-    col_func = cols[35]            # Coluna AJ
+if df_raw is not None:
+    try:
+        cols = df_raw.columns.tolist()
 
-    # --- TRATAMENTO ---
-    df_raw[col_ticket] = pd.to_numeric(df_raw[col_ticket].str.replace('.', '').str.replace(',', '.'), errors='coerce').fillna(0)
-    df_raw[col_func] = pd.to_numeric(df_raw[col_func], errors='coerce').fillna(0)
-    
-    df_raw[col_data_criacao] = pd.to_datetime(df_raw[col_data_criacao], dayfirst=True, errors='coerce')
-    df_raw[col_data_pagamento] = pd.to_datetime(df_raw[col_data_pagamento], dayfirst=True, errors='coerce')
+        # --- MAPEAMENTO DE COLUNAS ---
+        col_data_criacao = cols[2]     # C
+        col_data_pagamento = cols[23]  # X
+        col_cliente = cols[4]          # E
+        col_digitador = cols[15]       # P
+        col_analise = cols[25]         # Z
+        col_proposta = cols[26]        # AA
+        col_motivo = cols[28]          # AC
+        col_ticket = cols[29]          # AD
+        col_nome_empresa = cols[33]    # AH
+        col_cnpj = cols[34]            # AI
+        col_func = cols[35]            # AJ
 
-    # --- SIDEBAR FILTROS ---
-    st.sidebar.header("Filtros de Performance")
-    
-    data_min = df_raw[col_data_criacao].min().date()
-    data_max = df_raw[col_data_criacao].max().date()
-    periodo = st.sidebar.date_input("Período de Análise:", value=(data_min, data_max))
-    
-    lista_dig = sorted(df_raw[col_digitador].dropna().unique().tolist())
-    selecionado = st.sidebar.selectbox("Selecione o Digitador:", ["Todos"] + lista_dig)
+        # --- TRATAMENTO ---
+        df_raw[col_ticket] = pd.to_numeric(df_raw[col_ticket].str.replace('.', '').str.replace(',', '.'), errors='coerce').fillna(0)
+        df_raw[col_func] = pd.to_numeric(df_raw[col_func], errors='coerce').fillna(0)
+        df_raw[col_data_criacao] = pd.to_datetime(df_raw[col_data_criacao], dayfirst=True, errors='coerce')
+        df_raw[col_data_pagamento] = pd.to_datetime(df_raw[col_data_pagamento], dayfirst=True, errors='coerce')
 
-    # --- LÓGICA DE FILTRAGEM HÍBRIDA (REGRA DE NEGÓCIO) ---
-    def filtrar_por_data_hibrida(df, start_date, end_date):
-        # Condição A: Status é DISBURSED -> Olha para a Coluna X (Pagamento)
-        cond_pago = (df[col_proposta].str.upper().str.strip() == 'DISBURSED') & \
-                    (df[col_data_pagamento].dt.date >= start_date) & \
-                    (df[col_data_pagamento].dt.date <= end_date)
+        # --- FILTROS SIDEBAR ---
+        st.sidebar.header("Filtros de Performance")
+        data_min = df_raw[col_data_criacao].min().date() if not df_raw[col_data_criacao].dropna().empty else pd.Timestamp.now().date()
+        data_max = df_raw[col_data_criacao].max().date() if not df_raw[col_data_criacao].dropna().empty else pd.Timestamp.now().date()
         
-        # Condição B: Outros Status -> Olha para a Coluna C (Criação)
-        cond_outros = (df[col_proposta].str.upper().str.strip() != 'DISBURSED') & \
-                      (df[col_data_criacao].dt.date >= start_date) & \
-                      (df[col_data_criacao].dt.date <= end_date)
+        periodo = st.sidebar.date_input("Período de Análise:", value=(data_min, data_max))
         
-        return df[cond_pago | cond_outros]
+        lista_dig = sorted(df_raw[col_digitador].dropna().unique().tolist())
+        selecionado = st.sidebar.selectbox("Selecione o Digitador:", ["Todos"] + lista_dig)
 
-    df_periodo = filtrar_por_data_hibrida(df_raw, periodo[0], periodo[1])
-    
-    if selecionado != "Todos":
-        df_sel = df_periodo[df_periodo[col_digitador] == selecionado]
-    else:
-        df_sel = df_periodo
+        # --- LÓGICA DE FILTRAGEM HÍBRIDA ---
+        def filtrar_por_data_hibrida(df, start_date, end_date):
+            # Se DISBURSED -> Data de Pagamento (X)
+            cond_pago = (df[col_proposta].str.upper().str.strip() == 'DISBURSED') & \
+                        (df[col_data_pagamento].dt.date >= start_date) & \
+                        (df[col_data_pagamento].dt.date <= end_date)
+            # Senão -> Data de Criação (C)
+            cond_outros = (df[col_proposta].str.upper().str.strip() != 'DISBURSED') & \
+                          (df[col_data_criacao].dt.date >= start_date) & \
+                          (df[col_data_criacao].dt.date <= end_date)
+            return df[cond_pago | cond_outros]
 
-    # --- INTERFACE ---
-    st.title(f"Performance Topa+ | {selecionado}")
-    st.info(f"Critério: 'DISBURSED' pela data de pagamento (X). Demais status pela data de criação (C).")
+        df_periodo = filtrar_por_data_hibrida(df_raw, periodo[0], periodo[1])
+        df_sel = df_periodo if selecionado == "Todos" else df_periodo[df_periodo[col_digitador] == selecionado]
 
-    # 1. MÉTRICAS FINANCEIRAS
-    st.subheader("💰 Volume Consolidado")
-    df_pagos_periodo = df_periodo[df_periodo[col_proposta].str.upper().str.strip() == 'DISBURSED']
-    
-    vol_total = df_pagos_periodo[col_ticket].sum()
-    qtd_dig_ativos = df_periodo[col_digitador].nunique()
-    media_equipe = vol_total / qtd_dig_ativos if qtd_dig_ativos > 0 else 0
-    
-    vol_sel = df_sel[df_sel[col_proposta].str.upper().str.strip() == 'DISBURSED'][col_ticket].sum()
-
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Volume Pago (Período)", formata_reais(vol_sel))
-    m2.metric("Média por Digitador", formata_reais(media_equipe), delta=formata_reais(vol_sel - media_equipe))
-    m3.metric("Digitadores Ativos", f"{qtd_dig_ativos} un")
-
-    # 2. FUNIL DE EQUIPE COM DRILL DOWN (MÉTRICA PEDIDA)
-    st.divider()
-    st.subheader("👥 Seção 2: Funil Comparativo de Digitadores")
-    
-
-    with st.expander("📊 Visão de Status: Quantidade e Valores Retidos", expanded=True):
-        col_t1, col_t2 = st.tabs(["Quantidade de Propostas", "Valor Parado/Pago (R$)"])
+        # --- INTERFACE ---
+        st.title(f"Performance Topa+ | {selecionado}")
         
-        with col_t1:
-            st.markdown("**Propostas por Digitador em cada etapa:**")
-            df_status_qtd = df_periodo.groupby([col_digitador, col_proposta]).size().unstack(fill_value=0)
-            st.dataframe(df_status_qtd.style.background_gradient(cmap='Greens', axis=1), use_container_width=True)
-            
-        with col_t2:
-            st.markdown("**Valores (R$) por Digitador em cada etapa:**")
-            df_status_val = df_periodo.groupby([col_digitador, col_proposta])[col_ticket].sum().unstack(fill_value=0)
-            st.dataframe(df_status_val.applymap(formata_reais), use_container_width=True)
+        # 1. KPIs
+        vol_sel = df_sel[df_sel[col_proposta].str.upper().str.strip() == 'DISBURSED'][col_ticket].sum()
+        qtd_ativos = df_periodo[col_digitador].nunique()
+        media_equipe = (df_periodo[df_periodo[col_proposta].str.upper().str.strip() == 'DISBURSED'][col_ticket].sum() / qtd_ativos) if qtd_ativos > 0 else 0
 
-    # 3. DETALHAMENTO INDIVIDUAL (DRILL DOWN)
-    st.divider()
-    st.subheader(f"🔍 Drill Down Individual: {selecionado}")
-    t1, t2, t3 = st.tabs(["💸 Pagos", "📋 Todos os Status", "🚫 Motivos de Reprovação"])
-    
-    with t1:
-        st.dataframe(df_sel[df_sel[col_proposta].str.upper().str.strip() == 'DISBURSED'][[col_data_pagamento, col_cliente, col_ticket]], use_container_width=True)
-    with t2:
-        st.dataframe(df_sel[[col_data_criacao, col_cliente, col_proposta, col_ticket]], use_container_width=True)
-    with t3:
-        df_rep = df_sel[df_sel[col_analise].str.upper().str.strip() == 'REJECTED']
-        st.dataframe(df_rep[[col_cliente, col_motivo, col_ticket]], use_container_width=True)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Meu Volume Pago", formata_reais(vol_sel))
+        m2.metric("Média Equipe", formata_reais(media_equipe), delta=formata_reais(vol_sel - media_equipe))
+        m3.metric("Digitadores no Período", f"{qtd_ativos} un")
 
-    # 4. TOPA+ OPORTUNIDADES
-    st.divider()
-    st.subheader("🚀 Topa+ Oportunidades")
-    df_pago_op = df_sel[df_sel[col_proposta].str.upper().str.strip() == 'DISBURSED']
-    
-    if not df_pago_op.empty:
-        df_op = df_pago_op.groupby(col_cnpj).agg({
-            col_nome_empresa: 'first',
-            col_func: 'max',
-            col_ticket: ['count', 'sum']
-        }).reset_index()
-        df_op.columns = ['CNPJ', 'Empresa', 'Funcionários', 'Efetivados', 'Realizado']
+        # 2. FUNIL COMPARATIVO (QTD E VALOR)
+        st.divider()
+        st.subheader("👥 Funil Comparativo de Digitadores")
+        tab_q, tab_v = st.tabs(["Quantidade", "Valores (R$)"])
         
-        tkt_medio = df_pago_op[col_ticket].mean()
-        df_op['Potencial R$'] = df_op['Funcionários'] * tkt_medio
-        df_op['Gap R$'] = df_op['Potencial R$'] - df_op['Realizado']
-        
-        df_view = df_op.copy()
-        for c in ['Realizado', 'Potencial R$', 'Gap R$']:
-            df_view[c] = df_view[c].apply(formata_reais)
-        
-        st.dataframe(df_view.sort_values('Funcionários', ascending=False), use_container_width=True, hide_index=True)
+        with tab_q:
+            df_q = df_periodo.groupby([col_digitador, col_proposta]).size().unstack(fill_value=0)
+            st.dataframe(df_q.style.background_gradient(cmap='Greens', axis=1), use_container_width=True)
+        with tab_v:
+            df_v = df_periodo.groupby([col_digitador, col_proposta])[col_ticket].sum().unstack(fill_value=0)
+            st.dataframe(df_v.applymap(formata_reais), use_container_width=True)
 
-except Exception as e:
-    st.error(f"Erro ao processar: {e}")
+        # 3. DRILL DOWN INDIVIDUAL
+        st.divider()
+        st.subheader(f"🔍 Detalhes: {selecionado}")
+        t1, t2, t3 = st.tabs(["💸 Pagos", "📋 Todos", "🚫 Reprovados"])
+        with t1:
+            st.dataframe(df_sel[df_sel[col_proposta].str.upper().str.strip() == 'DISBURSED'][[col_data_pagamento, col_cliente, col_ticket]], use_container_width=True)
+        with t2:
+            st.dataframe(df_sel[[col_data_criacao, col_cliente, col_proposta, col_ticket]], use_container_width=True)
+        with t3:
+            st.dataframe(df_sel[df_sel[col_analise].str.upper().str.strip() == 'REJECTED'][[col_cliente, col_motivo]], use_container_width=True)
+
+        # 4. OPORTUNIDADES
+        st.divider()
+        st.subheader("🚀 Topa+ Oportunidades")
+        df_pago_op = df_sel[df_sel[col_proposta].str.upper().str.strip() == 'DISBURSED']
+        if not df_pago_op.empty:
+            df_op = df_pago_op.groupby(col_cnpj).agg({col_nome_empresa:'first', col_func:'max', col_ticket:['count','sum']}).reset_index()
+            df_op.columns = ['CNPJ','Empresa','Colab','Efetivados','Realizado']
+            tkt = df_pago_op[col_ticket].mean()
+            df_op['Potencial R$'] = df_op['Colab'] * tkt
+            df_op['Gap R$'] = df_op['Potencial R$'] - df_op['Realizado']
+            st.dataframe(df_op.sort_values('Colab', ascending=False).applymap(lambda x: formata_reais(x) if isinstance(x, (int, float)) and x > 1000 else x), use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Erro na análise dos dados: {e}")
