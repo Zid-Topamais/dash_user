@@ -45,7 +45,7 @@ try:
     cols = df_raw.columns.tolist()
 
     # Mapeamento de Colunas
-    col_data = cols[24]        # X
+    col_data = cols[2]        # C
     col_cliente = cols[4]     # E
     col_digitador = cols[15]  # P
     col_analise = cols[25]    # Z
