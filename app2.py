@@ -155,4 +155,12 @@ if df_raw is not None:
             df_op.columns = ['CNPJ','Empresa','Colab','Efetivados','Realizado']
             tkt = df_pago_op[col_ticket].mean()
             df_op['Potencial R$'] = df_op['Colab'] * tkt
-            df_op['Gap R$'] =
+            df_op['Gap R$'] = df_op['Potencial R$'] - df_op['Realizado']
+            
+            df_view = df_op.copy()
+            for c in ['Realizado', 'Potencial R$', 'Gap R$']:
+                df_view[c] = df_view[c].apply(formata_reais)
+            st.dataframe(df_view.sort_values('Colab', ascending=False), use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Erro na análise: {e}")
