@@ -28,9 +28,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- CONEXÃO E CARREGAMENTO ---
-# Verifique se este ID está correto na sua barra de endereços do navegador
 sheet_id = "1_p5-a842gjyMoif57NdJLrUfccNkVptkNiuSPtTe5Pw"
-# Verifique se a aba se chama exatamente "Dados2"
 url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet=Dados2"
 
 @st.cache_data(ttl=600)
@@ -41,7 +39,6 @@ def load_data(url_link):
         return df
     except Exception as e:
         st.error(f"Erro ao acessar a planilha: {e}")
-        st.info("Verifique se a planilha está 'Publicada na Web' como CSV e se o nome da aba é 'Dados2'.")
         return None
 
 def formata_reais(v):
@@ -74,8 +71,9 @@ if df_raw is not None:
 
         # --- FILTROS SIDEBAR ---
         st.sidebar.header("Filtros de Performance")
-        data_min = df_raw[col_data_criacao].min().date() if not df_raw[col_data_criacao].dropna().empty else pd.Timestamp.now().date()
-        data_max = df_raw[col_data_criacao].max().date() if not df_raw[col_data_criacao].dropna().empty else pd.Timestamp.now().date()
+        valid_dates = df_raw[col_data_criacao].dropna()
+        data_min = valid_dates.min().date() if not valid_dates.empty else pd.Timestamp.now().date()
+        data_max = valid_dates.max().date() if not valid_dates.empty else pd.Timestamp.now().date()
         
         periodo = st.sidebar.date_input("Período de Análise:", value=(data_min, data_max))
         
@@ -84,11 +82,9 @@ if df_raw is not None:
 
         # --- LÓGICA DE FILTRAGEM HÍBRIDA ---
         def filtrar_por_data_hibrida(df, start_date, end_date):
-            # Se DISBURSED -> Data de Pagamento (X)
             cond_pago = (df[col_proposta].str.upper().str.strip() == 'DISBURSED') & \
                         (df[col_data_pagamento].dt.date >= start_date) & \
                         (df[col_data_pagamento].dt.date <= end_date)
-            # Senão -> Data de Criação (C)
             cond_outros = (df[col_proposta].str.upper().str.strip() != 'DISBURSED') & \
                           (df[col_data_criacao].dt.date >= start_date) & \
                           (df[col_data_criacao].dt.date <= end_date)
@@ -99,41 +95,58 @@ if df_raw is not None:
 
         # --- INTERFACE ---
         st.title(f"Performance Topa+ | {selecionado}")
-        
-        # 1. KPIs
+
+        # 1. MÉTRICAS FINANCEIRAS
+        df_pagos_periodo = df_periodo[df_periodo[col_proposta].str.upper().str.strip() == 'DISBURSED']
+        vol_total = df_pagos_periodo[col_ticket].sum()
+        qtd_dig_ativos = df_periodo[col_digitador].nunique()
+        media_equipe = vol_total / qtd_dig_ativos if qtd_dig_ativos > 0 else 0
         vol_sel = df_sel[df_sel[col_proposta].str.upper().str.strip() == 'DISBURSED'][col_ticket].sum()
-        qtd_ativos = df_periodo[col_digitador].nunique()
-        media_equipe = (df_periodo[df_periodo[col_proposta].str.upper().str.strip() == 'DISBURSED'][col_ticket].sum() / qtd_ativos) if qtd_ativos > 0 else 0
 
         m1, m2, m3 = st.columns(3)
         m1.metric("Meu Volume Pago", formata_reais(vol_sel))
         m2.metric("Média Equipe", formata_reais(media_equipe), delta=formata_reais(vol_sel - media_equipe))
-        m3.metric("Digitadores no Período", f"{qtd_ativos} un")
+        m3.metric("Digitadores Ativos", f"{qtd_dig_ativos} un")
 
-        # 2. FUNIL COMPARATIVO (QTD E VALOR)
+        # --- 2. FUNIL COMPARATIVO COM DATA DA ÚLTIMA PROPOSTA ---
         st.divider()
         st.subheader("👥 Funil Comparativo de Digitadores")
-        tab_q, tab_v = st.tabs(["Quantidade", "Valores (R$)"])
+        
+
+        # Cálculo da Data da Última Proposta (Criação) por Digitador
+        df_ultima_data = df_periodo.groupby(col_digitador)[col_data_criacao].max().dt.strftime('%d/%m/%Y').rename("Última Proposta")
+
+        tab_q, tab_v = st.tabs(["Quantidade por Status", "Valores por Status (R$)"])
         
         with tab_q:
             df_q = df_periodo.groupby([col_digitador, col_proposta]).size().unstack(fill_value=0)
-            st.dataframe(df_q.style.background_gradient(cmap='Greens', axis=1), use_container_width=True)
+            # Concatenar com a data da última proposta
+            df_q_final = pd.concat([df_ultima_data, df_q], axis=1).fillna(0)
+            st.dataframe(df_q_final.style.background_gradient(cmap='Greens', subset=df_q.columns), use_container_width=True)
+            
         with tab_v:
             df_v = df_periodo.groupby([col_digitador, col_proposta])[col_ticket].sum().unstack(fill_value=0)
-            st.dataframe(df_v.applymap(formata_reais), use_container_width=True)
+            # Concatenar com a data da última proposta
+            df_v_final = pd.concat([df_ultima_data, df_v], axis=1).fillna(0)
+            # Formatar apenas as colunas financeiras
+            df_v_view = df_v_final.copy()
+            for col in df_v.columns:
+                df_v_view[col] = df_v_view[col].apply(formata_reais)
+            st.dataframe(df_v_view, use_container_width=True)
 
         # 3. DRILL DOWN INDIVIDUAL
         st.divider()
-        st.subheader(f"🔍 Detalhes: {selecionado}")
-        t1, t2, t3 = st.tabs(["💸 Pagos", "📋 Todos", "🚫 Reprovados"])
+        st.subheader(f"🔍 Detalhamento: {selecionado}")
+        t1, t2, t3 = st.tabs(["💸 Pagos (X)", "📋 Todos os Status (C)", "🚫 Reprovados"])
         with t1:
             st.dataframe(df_sel[df_sel[col_proposta].str.upper().str.strip() == 'DISBURSED'][[col_data_pagamento, col_cliente, col_ticket]], use_container_width=True)
         with t2:
             st.dataframe(df_sel[[col_data_criacao, col_cliente, col_proposta, col_ticket]], use_container_width=True)
         with t3:
-            st.dataframe(df_sel[df_sel[col_analise].str.upper().str.strip() == 'REJECTED'][[col_cliente, col_motivo]], use_container_width=True)
+            df_rep = df_sel[df_sel[col_analise].str.upper().str.strip() == 'REJECTED']
+            st.dataframe(df_rep[[col_cliente, col_motivo, col_ticket]], use_container_width=True)
 
-        # 4. OPORTUNIDADES
+        # 4. TOPA+ OPORTUNIDADES
         st.divider()
         st.subheader("🚀 Topa+ Oportunidades")
         df_pago_op = df_sel[df_sel[col_proposta].str.upper().str.strip() == 'DISBURSED']
@@ -142,8 +155,4 @@ if df_raw is not None:
             df_op.columns = ['CNPJ','Empresa','Colab','Efetivados','Realizado']
             tkt = df_pago_op[col_ticket].mean()
             df_op['Potencial R$'] = df_op['Colab'] * tkt
-            df_op['Gap R$'] = df_op['Potencial R$'] - df_op['Realizado']
-            st.dataframe(df_op.sort_values('Colab', ascending=False).applymap(lambda x: formata_reais(x) if isinstance(x, (int, float)) and x > 1000 else x), use_container_width=True)
-
-    except Exception as e:
-        st.error(f"Erro na análise dos dados: {e}")
+            df_op['Gap R$'] =
