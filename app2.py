@@ -108,55 +108,21 @@ try:
     f2.metric("Média Equipe", formata_reais(vol_med), delta=formata_reais(vol_sel - vol_med))
     f3.metric(f"Líder ({top_nome})", formata_reais(vol_top), delta=formata_reais(vol_sel - vol_top), delta_color="normal")
 
-    # --- 2. FUNIL DE EQUIPE COM DRILL DOWN (POR DIGITADOR) ---
+    # 2. FUNIL COM DRILL DOWN
     st.divider()
-    st.subheader("👥 Funil Comparativo de Digitadores")
-
-    # Preparação dos dados para a tabela pivot
-    # Vamos agrupar por Digitador e Status da Proposta
-    # col_proposta (AA) e col_ticket (AD)
-    
-    with st.expander("📊 Visão Consolidada: Qtd e Valor por Status", expanded=True):
-        
-        # 1. Tabela de QUANTIDADE (Qtd de Propostas por Status)
-        df_status_qtd = df_periodo.groupby([col_digitador, col_proposta]).size().unstack(fill_value=0)
-        
-        # 2. Tabela de VALOR (Soma de R$ por Status)
-        df_status_val = df_periodo.groupby([col_digitador, col_proposta])[col_ticket].sum().unstack(fill_value=0)
-
-        # Seleção do que visualizar
-        visao = st.radio("Escolha a métrica da tabela:", ["Quantidade de Propostas", "Valor Total (R$)"], horizontal=True)
-
-        if visao == "Quantidade de Propostas":
-            st.markdown("**Contagem de propostas por etapa do funil:**")
-            # Estilização para destacar números maiores
-            st.dataframe(df_status_qtd.style.background_gradient(cmap='Greens', axis=0), use_container_width=True)
-            
-        else:
-            st.markdown("**Valores financeiros (R$) parados/pagos em cada etapa:**")
-            # Formatando os valores para Reais na exibição
-            df_val_formatado = df_status_val.applymap(formata_reais)
-            st.dataframe(df_val_formatado, use_container_width=True)
-
-        st.caption(ℹ️ Use a barra de rolagem lateral da tabela para ver todos os status (CANCELLED, DISBURSED, EXPIRED, etc.)")
-
-    # --- 2.1 DRILL DOWN INDIVIDUAL (O QUE VOCÊ JÁ TINHA, MAS REATIVO) ---
-    st.divider()
-    st.subheader(f"🔍 Detalhamento Individual: {selecionado}")
-    
     tab1, tab2, tab3, tab4 = st.tabs(["📋 Simuladas", "✅ Aprovadas", "💸 Pagos", "🚫 Reprovadas"])
 
     with tab1:
-        st.markdown(f'<div class="funnel-header">LISTA: SIMULADAS ({selecionado})</div>', unsafe_allow_html=True)
+        st.markdown('<div class="funnel-header">DETALHE: SIMULADAS</div>', unsafe_allow_html=True)
         st.dataframe(data_sel["Simuladas"][[col_data, col_cliente, col_analise, col_proposta, col_ticket]], use_container_width=True)
     with tab2:
-        st.markdown(f'<div class="funnel-header">LISTA: APROVADAS ({selecionado})</div>', unsafe_allow_html=True)
+        st.markdown('<div class="funnel-header">DETALHE: APROVADAS</div>', unsafe_allow_html=True)
         st.dataframe(data_sel["Aprovadas"][[col_data, col_cliente, col_ticket]], use_container_width=True)
     with tab3:
-        st.markdown(f'<div class="funnel-header">LISTA: PAGOS ({selecionado})</div>', unsafe_allow_html=True)
+        st.markdown('<div class="funnel-header">DETALHE: PAGOS</div>', unsafe_allow_html=True)
         st.dataframe(data_sel["Pagos"][[col_data, col_cliente, col_ticket]], use_container_width=True)
     with tab4:
-        st.markdown(f'<div class="funnel-header">MOTIVOS DE REPROVAÇÃO ({selecionado})</div>', unsafe_allow_html=True)
+        st.markdown('<div class="funnel-header">ANÁLISE DE REPROVAÇÕES</div>', unsafe_allow_html=True)
         st.dataframe(data_sel["Reprovadas"][[col_cliente, col_motivo]], use_container_width=True)
 
     # --- 3. TOPA+ OPORTUNIDADES (SOMENTE DISBURSED) ---
