@@ -1,64 +1,56 @@
 import streamlit as st
 import pandas as pd
-from sqlalchemy import create_engine
-from datetime import datetime, timedelta
 
 # Configuração da página
 st.set_page_config(page_title="Ativação de Parceiros", layout="wide")
 
-# Conexão segura
-def get_engine():
-    url = st.secrets["connections"]["postgresql"]["url"]
-    return create_engine(url)
+## 1. Carregamento dos Dados
+# Considerando que os CSVs estão no mesmo diretório
+df_user = pd.read_csv('meu_banco.xlsx - app_topamais_user.csv')
+df_company = pd.read_csv('meu_banco.xlsx - app_topamais_company.csv')
+df_squad = pd.read_csv('meu_banco.xlsx - app_topamais_squad.csv')
+df_user_company = pd.read_csv('meu_banco.xlsx - app_topamais_user_company.csv')
+df_user_squad = pd.read_csv('meu_banco.xlsx - app_topamais_user_squad.csv')
 
+## 2. Processamento (Joins)
+# Cruzando Usuário com Empresa
+df_merge = df_user_company.merge(df_company[['id', 'name']], left_on='company_id', right_on='id', suffixes=('', '_company'))
+df_merge = df_merge.merge(df_user[['id', 'name', 'created_at']], on='user_id')
+
+# Cruzando com Squad
+df_merge = df_merge.merge(df_user_squad, on='user_id', how='left')
+df_merge = df_merge.merge(df_squad[['id', 'name']], left_on='squad_id', right_on='id', how='left', suffixes=('_co', '_sq'))
+
+## 3. Limpeza e Organização
+# Selecionando e renomeando as colunas na sequência exata pedida
+df_final = df_merge[[
+    'name_co',   # Empresa (Company Name)
+    'name_sq',   # Squad (Squad Name)
+    'name',      # Parceiro (User Name)
+    'created_at' # Data de Criação
+]].copy()
+
+df_final.columns = ['Empresa', 'Squad', 'Parceiro', 'Data de Criação']
+df_final['Data de Criação'] = pd.to_datetime(df_final['Data de Criação']).dt.strftime('%d/%m/%Y %H:%M')
+
+## 4. Interface Streamlit
 st.title("🚀 Ativação de Parceiros")
-st.subheader("Novos parceiros registrados na última semana")
+st.markdown("Relatório detalhado de entrada de novos parceiros por estrutura.")
 
-try:
-    engine = get_engine()
-    
-    # Query que junta Usuário, Squad e Empresa
-    # Nota: Usei 'company_id' e 'squad_id' como chaves comuns de ligação (JOIN)
-    query = """
-    SELECT 
-        u.name AS parceiro,
-        u.created_at AS data_cadastro,
-        c.name AS empresa,
-        s.name AS squad
-    FROM app_topamais_user u
-    LEFT JOIN app_topamais_company c ON u.company_id = c.id
-    LEFT JOIN app_topamais_squad s ON u.squad_id = s.id
-    WHERE u.created_at >= CURRENT_DATE - INTERVAL '7 days'
-    ORDER BY u.created_at DESC
-    """
-    
-    df = pd.read_sql(query, engine)
+# Filtros rápidos (opcional)
+col1, col2 = st.columns(2)
+with col1:
+    empresa_filter = st.multiselect("Filtrar Empresa", options=df_final['Empresa'].unique())
+with col2:
+    squad_filter = st.multiselect("Filtrar Squad", options=df_final['Squad'].unique())
 
-    # Tratamento de datas para exibição e compatibilidade
-    if not df.empty:
-        df['data_cadastro'] = pd.to_datetime(df['data_cadastro']).dt.tz_localize(None)
-        
-        # KPIs (Indicadores)
-        total_semana = len(df)
-        st.metric("Novos Parceiros (Últimos 7 dias)", total_semana)
-        
-        st.markdown("---")
-        
-        # Tabela formatada
-        st.dataframe(
-            df, 
-            column_config={
-                "data_cadastro": st.column_config.DatetimeColumn("Data de Cadastro", format="DD/MM/YYYY HH:mm"),
-                "parceiro": "Nome do Parceiro",
-                "empresa": "Empresa",
-                "squad": "Squad/Equipe"
-            },
-            use_container_width=True,
-            hide_index=True
-        )
-    else:
-        st.info("Nenhum novo parceiro ativado nos últimos 7 dias.")
+if empresa_filter:
+    df_final = df_final[df_final['Empresa'].isin(empresa_filter)]
+if squad_filter:
+    df_final = df_final[df_final['Squad'].isin(squad_filter)]
 
-except Exception as e:
-    st.error(f"Erro ao processar dados: {e}")
-    st.info("Dica: Verifique se os nomes das colunas de ligação (company_id/squad_id) estão corretos.")
+# Exibição da Tabela
+st.dataframe(df_final, use_container_width=True, hide_index=True)
+
+# Métrica simples de resumo
+st.sidebar.metric("Total de Parceiros", len(df_final))
