@@ -7,43 +7,45 @@ st.set_page_config(page_title="Ativação de Parceiros", layout="wide")
 # Conexão com o Banco
 DB_URL = "postgresql://neondb_owner:npg_BaxWC3beIzq6@ep-shy-dew-accl78ee-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require"
 
-# --- Estilização CSS para Mini-Cards Verticais ---
+# --- Estilização CSS Avançada ---
 st.markdown("""
     <style>
-    /* Estilo do container do KPI */
     .kpi-card {
-        background-color: #f8f9fa;
-        padding: 8px;
-        border-radius: 5px;
-        border-left: 3px solid #007bff;
+        background-color: #ffffff;
+        padding: 6px 10px;
+        border-radius: 6px;
+        border: 1px solid #e6e9ef;
         margin-bottom: 4px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     }
     .kpi-label {
-        font-size: 10px;
-        color: #666;
-        margin-bottom: 0px;
-        text-transform: uppercase;
-        font-weight: bold;
+        font-size: 11px;
+        color: #555;
+        font-weight: 500;
     }
     .kpi-value {
-        font-size: 16px;
+        font-size: 14px;
         font-weight: bold;
         color: #111;
     }
-    /* Ajuste de títulos das colunas */
+    .delta-up { color: #007bff; font-size: 10px; font-weight: bold; }
+    .delta-down { color: #ff4b4b; font-size: 10px; font-weight: bold; }
+    .meta-pct { color: #666; font-size: 10px; margin-left: 5px; }
     .week-title {
-        font-size: 14px;
+        font-size: 13px;
         font-weight: bold;
-        text-align: center;
-        margin-bottom: 8px;
-        color: #333;
+        margin-bottom: 6px;
+        color: #1f2937;
+        border-bottom: 2px solid #007bff;
+        width: fit-content;
     }
     </style>
     """, unsafe_allow_html=True)
 
 def load_data():
     engine = create_engine(DB_URL)
-    # Query unificada para evitar múltiplas chamadas
     query_p = "SELECT typed_by, paid_at FROM app_topamais_proposal WHERE status = 'DISBURSED' AND paid_at IS NOT NULL"
     query_t = """
     SELECT 
@@ -63,50 +65,57 @@ def load_data():
         df_t = pd.read_sql(query_t, conn)
         return df_p, df_t
 
-def render_mini_kpi(label, value):
-    st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-label">{label}</div>
-            <div class="kpi-value">{value}</div>
-        </div>
-    """, unsafe_allow_html=True)
+def calc_pct(current, previous):
+    if previous == 0: return 0
+    return ((current - previous) / previous) * 100
 
 try:
     df_p, df_t = load_data()
     META = 24
 
-    # Cálculos Semana 1
+    # --- PROCESSAMENTO SEMANA 1 ---
     w1_range = df_p[(df_p['paid_at'].dt.day >= 1) & (df_p['paid_at'].dt.day <= 7)]
-    prev_w1 = w1_range[(w1_range['paid_at'].dt.month == 1) & (w1_range['paid_at'].dt.year == 2026)]['typed_by'].nunique()
-    act_w1 = w1_range[(w1_range['paid_at'].dt.month == 2) & (w1_range['paid_at'].dt.year == 2026)]['typed_by'].nunique()
+    prev_w1 = w1_range[(w1_range['paid_at'].dt.month == 1)]['typed_by'].nunique()
+    act_w1 = w1_range[(w1_range['paid_at'].dt.month == 2)]['typed_by'].nunique()
+    
+    pct_w1 = calc_pct(act_w1, prev_w1)
+    color_w1 = "delta-up" if pct_w1 >= 0 else "delta-down"
+    meta_pct_w1 = (act_w1 / META) * 100
 
-    # Cálculos Semana 2
+    # --- PROCESSAMENTO SEMANA 2 (CUMULATIVO) ---
     w2_range = df_p[(df_p['paid_at'].dt.day >= 8) & (df_p['paid_at'].dt.day <= 14)]
-    prev_w2 = w2_range[(w2_range['paid_at'].dt.month == 1) & (w2_range['paid_at'].dt.year == 2026)]['typed_by'].nunique()
-    act_w2 = w2_range[(w2_range['paid_at'].dt.month == 2) & (w2_range['paid_at'].dt.year == 2026)]['typed_by'].nunique()
+    prev_w2 = w2_range[(w2_range['paid_at'].dt.month == 1)]['typed_by'].nunique()
+    act_w2 = w2_range[(w2_range['paid_at'].dt.month == 2)]['typed_by'].nunique()
 
-    # Alinhamento: As colunas da tabela são (Empresa, Squad, Parceiro, Data). 
-    # Usamos um spacer proporcional para os KPIs caírem em cima das colunas de "Semana"
+    pct_w2 = calc_pct(act_w2, prev_w2)
+    color_w2 = "delta-up" if pct_w2 >= 0 else "delta-down"
+    
+    # Meta cumulativa: (Ativos W1 + Ativos W2) / Meta
+    meta_cumulativa_w2 = ((act_w1 + act_w2) / META) * 100
+
+    # --- LAYOUT ---
     col_spacer, col_w1, col_w2 = st.columns([3.8, 1, 1])
 
     with col_w1:
         st.markdown('<div class="week-title">Semana 1-7</div>', unsafe_allow_html=True)
-        render_mini_kpi("Ant.", prev_w1)
-        render_mini_kpi("Ativos", act_w1)
-        render_mini_kpi("Meta", META)
+        st.markdown(f'''
+            <div class="kpi-card"><span class="kpi-label">Ant.</span><span class="kpi-value">{prev_w1}</span></div>
+            <div class="kpi-card"><span class="kpi-label">Ativos</span><span class="kpi-value">{act_w1} <span class="{color_w1}">{pct_w1:+.1f}%</span></span></div>
+            <div class="kpi-card"><span class="kpi-label">Meta</span><span class="kpi-value">{META} <span class="meta-pct">({meta_pct_w1:.0f}%)</span></span></div>
+        ''', unsafe_allow_html=True)
 
     with col_w2:
         st.markdown('<div class="week-title">Semana 8-14</div>', unsafe_allow_html=True)
-        render_mini_kpi("Ant.", prev_w2)
-        render_mini_kpi("Ativos", act_w2)
-        render_mini_kpi("Meta", META)
+        st.markdown(f'''
+            <div class="kpi-card"><span class="kpi-label">Ant.</span><span class="kpi-value">{prev_w2}</span></div>
+            <div class="kpi-card"><span class="kpi-label">Ativos</span><span class="kpi-value">{act_w2} <span class="{color_w2}">{pct_w2:+.1f}%</span></span></div>
+            <div class="kpi-card"><span class="kpi-label">Meta</span><span class="kpi-value">{META} <span class="meta-pct">({meta_cumulativa_w2:.0f}% sum)</span></span></div>
+        ''', unsafe_allow_html=True)
 
     st.divider()
 
-    # Formatação Final da Tabela
     if not df_t.empty:
         df_t['Data de Criação'] = pd.to_datetime(df_t['Data de Criação']).dt.strftime('%d/%m/%Y')
-    
     st.dataframe(df_t, use_container_width=True, hide_index=True)
 
 except Exception as e:
