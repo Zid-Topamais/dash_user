@@ -7,57 +7,49 @@ st.set_page_config(page_title="Ativação de Parceiros", layout="wide")
 # Conexão com o Banco
 DB_URL = "postgresql://neondb_owner:npg_BaxWC3beIzq6@ep-shy-dew-accl78ee-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require"
 
-def load_kpi_data():
-    engine = create_engine(DB_URL)
-    query = """
-    SELECT typed_by, paid_at 
-    FROM app_topamais_proposal 
-    WHERE status = 'DISBURSED' AND paid_at IS NOT NULL
-    """
-    with engine.connect() as conn:
-        df = pd.read_sql(query, conn)
-        df['paid_at'] = pd.to_datetime(df['paid_at'])
-        return df
+# --- Estilização CSS para Mini-Cards Verticais ---
+st.markdown("""
+    <style>
+    /* Estilo do container do KPI */
+    .kpi-card {
+        background-color: #f8f9fa;
+        padding: 8px;
+        border-radius: 5px;
+        border-left: 3px solid #007bff;
+        margin-bottom: 4px;
+    }
+    .kpi-label {
+        font-size: 10px;
+        color: #666;
+        margin-bottom: 0px;
+        text-transform: uppercase;
+        font-weight: bold;
+    }
+    .kpi-value {
+        font-size: 16px;
+        font-weight: bold;
+        color: #111;
+    }
+    /* Ajuste de títulos das colunas */
+    .week-title {
+        font-size: 14px;
+        font-weight: bold;
+        text-align: center;
+        margin-bottom: 8px;
+        color: #333;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-def calculate_week_metrics(df, start_day, end_day, current_month=2, current_year=2026):
-    df_range = df[(df['paid_at'].dt.day >= start_day) & (df['paid_at'].dt.day <= end_day)]
-    
-    # Período Anterior (Mesmo range no mês passado - Jan 2026)
-    prev_month_mask = (df_range['paid_at'].dt.year == current_year) & (df_range['paid_at'].dt.month == (current_month - 1))
-    prev_period = df_range[prev_month_mask]['typed_by'].nunique()
-    
-    # Ativos (Atuais - Fev 2026)
-    current_mask = (df_range['paid_at'].dt.year == current_year) & (df_range['paid_at'].dt.month == current_month)
-    actives = df_range[current_mask]['typed_by'].nunique()
-    
-    return prev_period, actives
-
-def load_table_data():
+def load_data():
     engine = create_engine(DB_URL)
-    query = """
+    # Query unificada para evitar múltiplas chamadas
+    query_p = "SELECT typed_by, paid_at FROM app_topamais_proposal WHERE status = 'DISBURSED' AND paid_at IS NOT NULL"
+    query_t = """
     SELECT 
-        c.name AS "Empresa",
-        s.name AS "Squad",
-        u.name AS "Parceiro",
-        u.created_at AS "Data de Criação",
-        CASE 
-            WHEN EXISTS (
-                SELECT 1 FROM app_topamais_proposal p 
-                WHERE p.typed_by = u.id 
-                AND p.status = 'DISBURSED' 
-                AND p.paid_at >= '2026-02-01' AND p.paid_at < '2026-02-08'
-            ) THEN 'Sim' 
-            ELSE 'Não' 
-        END AS "Semana 1 - 7",
-        CASE 
-            WHEN EXISTS (
-                SELECT 1 FROM app_topamais_proposal p 
-                WHERE p.typed_by = u.id 
-                AND p.status = 'DISBURSED' 
-                AND p.paid_at >= '2026-02-08' AND p.paid_at < '2026-02-15'
-            ) THEN 'Sim' 
-            ELSE 'Não' 
-        END AS "Semana 8 - 14"
+        c.name AS "Empresa", s.name AS "Squad", u.name AS "Parceiro", u.created_at AS "Data de Criação",
+        CASE WHEN EXISTS (SELECT 1 FROM app_topamais_proposal p WHERE p.typed_by = u.id AND p.status = 'DISBURSED' AND p.paid_at >= '2026-02-01' AND p.paid_at < '2026-02-08') THEN 'Sim' ELSE 'Não' END AS "Semana 1 - 7",
+        CASE WHEN EXISTS (SELECT 1 FROM app_topamais_proposal p WHERE p.typed_by = u.id AND p.status = 'DISBURSED' AND p.paid_at >= '2026-02-08' AND p.paid_at < '2026-02-15') THEN 'Sim' ELSE 'Não' END AS "Semana 8 - 14"
     FROM app_topamais_user u
     LEFT JOIN app_topamais_user_company uc ON u.id = uc.user_id
     LEFT JOIN app_topamais_company c ON uc.company_id = c.id
@@ -66,55 +58,56 @@ def load_table_data():
     ORDER BY u.created_at DESC
     """
     with engine.connect() as conn:
-        return pd.read_sql(query, conn)
+        df_p = pd.read_sql(query_p, conn)
+        df_p['paid_at'] = pd.to_datetime(df_p['paid_at'])
+        df_t = pd.read_sql(query_t, conn)
+        return df_p, df_t
 
-# --- Estilização CSS para os quadrinhos verticais ---
-st.markdown("""
-    <style>
-    [data-testid="stMetric"] {
-        background-color: #f0f2f6;
-        padding: 10px;
-        border-radius: 10px;
-        border: 1px solid #e0e4e9;
-        margin-bottom: 5px;
-    }
-    </style>
+def render_mini_kpi(label, value):
+    st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-label">{label}</div>
+            <div class="kpi-value">{value}</div>
+        </div>
     """, unsafe_allow_html=True)
 
 try:
-    df_kpis = load_kpi_data()
-    df_table = load_table_data()
-
-    # Cálculos
-    prev_w1, active_w1 = calculate_week_metrics(df_kpis, 1, 7)
-    prev_w2, active_w2 = calculate_week_metrics(df_kpis, 8, 14)
+    df_p, df_t = load_data()
     META = 24
 
-    # Layout: Colunas para alinhar KPIs com a tabela abaixo
-    # Ajustando o peso das colunas para os KPIs ficarem em cima das colunas Sim/Não
-    col_info, col_w1, col_w2 = st.columns([2.5, 1, 1])
+    # Cálculos Semana 1
+    w1_range = df_p[(df_p['paid_at'].dt.day >= 1) & (df_p['paid_at'].dt.day <= 7)]
+    prev_w1 = w1_range[(w1_range['paid_at'].dt.month == 1) & (w1_range['paid_at'].dt.year == 2026)]['typed_by'].nunique()
+    act_w1 = w1_range[(w1_range['paid_at'].dt.month == 2) & (w1_range['paid_at'].dt.year == 2026)]['typed_by'].nunique()
+
+    # Cálculos Semana 2
+    w2_range = df_p[(df_p['paid_at'].dt.day >= 8) & (df_p['paid_at'].dt.day <= 14)]
+    prev_w2 = w2_range[(w2_range['paid_at'].dt.month == 1) & (w2_range['paid_at'].dt.year == 2026)]['typed_by'].nunique()
+    act_w2 = w2_range[(w2_range['paid_at'].dt.month == 2) & (w2_range['paid_at'].dt.year == 2026)]['typed_by'].nunique()
+
+    # Alinhamento: As colunas da tabela são (Empresa, Squad, Parceiro, Data). 
+    # Usamos um spacer proporcional para os KPIs caírem em cima das colunas de "Semana"
+    col_spacer, col_w1, col_w2 = st.columns([3.8, 1, 1])
 
     with col_w1:
-        st.subheader("Semana 1 - 7")
-        # Infos empilhadas verticalmente
-        st.metric("Período Anterior", prev_w1)
-        st.metric("Ativos", active_w1)
-        st.metric("Meta Fev", META, delta=active_w1 - META)
+        st.markdown('<div class="week-title">Semana 1-7</div>', unsafe_allow_html=True)
+        render_mini_kpi("Ant.", prev_w1)
+        render_mini_kpi("Ativos", act_w1)
+        render_mini_kpi("Meta", META)
 
     with col_w2:
-        st.subheader("Semana 8 - 14")
-        # Infos empilhadas verticalmente
-        st.metric("Período Anterior", prev_w2)
-        st.metric("Ativos", active_w2)
-        st.metric("Meta Fev", META, delta=active_w2 - META)
+        st.markdown('<div class="week-title">Semana 8-14</div>', unsafe_allow_html=True)
+        render_mini_kpi("Ant.", prev_w2)
+        render_mini_kpi("Ativos", act_w2)
+        render_mini_kpi("Meta", META)
 
     st.divider()
 
-    # Tratamento da tabela
-    if not df_table.empty:
-        df_table['Data de Criação'] = pd.to_datetime(df_table['Data de Criação']).dt.strftime('%d/%m/%Y')
+    # Formatação Final da Tabela
+    if not df_t.empty:
+        df_t['Data de Criação'] = pd.to_datetime(df_t['Data de Criação']).dt.strftime('%d/%m/%Y')
     
-    st.dataframe(df_table, use_container_width=True, hide_index=True)
+    st.dataframe(df_t, use_container_width=True, hide_index=True)
 
 except Exception as e:
-    st.error(f"Ocorreu um erro ao carregar os dados: {e}")
+    st.error(f"Erro: {e}")
